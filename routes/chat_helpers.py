@@ -714,7 +714,8 @@ async def build_chat_context(
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
-        sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
+        sess, sess.endpoint_url, sess.model, messages, sess.headers,
+        agent_mode=agent_mode, owner=user,
     )
     messages = trim_for_context(messages, context_length)
 
