@@ -309,18 +309,26 @@ def trim_for_context(messages: List[Dict], context_length: int, reserve_tokens: 
     return result
 
 
+import os
+TRACE_AGENT_MEMORY = os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true"
+
 async def maybe_compact(
     session,
     endpoint_url: str,
     model: str,
     messages: List[Dict],
     headers: Optional[Dict] = None,
+    agent_mode: bool = False,
     owner: Optional[str] = None,
 ) -> tuple:
     """Check context usage and compact if above threshold.
 
     Returns (messages, context_length, was_compacted).
     """
+    if TRACE_AGENT_MEMORY and agent_mode:
+        # Bypass native compactor entirely; TRACE handles context density.
+        return messages, get_context_length(endpoint_url, model), False
+
     context_length = get_context_length(endpoint_url, model)
     used = estimate_tokens(messages)
     pct = (used / context_length) * 100 if context_length else 0

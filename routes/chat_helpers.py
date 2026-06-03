@@ -781,7 +781,8 @@ async def build_chat_context(
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
-        sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
+        sess, sess.endpoint_url, sess.model, messages, sess.headers,
+        agent_mode=agent_mode, owner=user,
     )
     _before_trim_messages = len(messages)
     _before_trim_tokens = estimate_tokens(messages)
