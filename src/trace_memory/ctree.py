@@ -88,12 +88,6 @@ class Node:
         self.sub_node_count: int = sub_node_count
         self.created_at: float = time.time()
 
-    def update_sub_node_count(self):
-        """Propagate child-count changes up the ancestor chain."""
-        self.sub_node_count = len(self.children)
-        if self.parent is not None:
-            self.parent.update_sub_node_count()
-
     def is_leaf(self) -> bool:
         return len(self.children) == 0
 
@@ -438,7 +432,6 @@ class CTree:
         )
         first_topic.children.append(msg_node)
         self.root.children.append(first_topic)
-        self.root.update_sub_node_count()
         self.root.end_index = msg_count
         self.current_node   = first_topic
 
@@ -454,7 +447,6 @@ class CTree:
             parent            = target_topic,
         )
         target_topic.children.append(msg_node)
-        target_topic.update_sub_node_count()
         target_topic.end_index = len(self.conversation)
         self.current_node      = target_topic
 
@@ -496,7 +488,6 @@ class CTree:
             parent      = parent,
         )
         parent.children.append(new_topic)
-        parent.update_sub_node_count()
         return new_topic
 
     def _create_new_node(self, message, start_index, parent, topic_name=""):
@@ -509,7 +500,6 @@ class CTree:
             parent=parent,
         )
         parent.children.append(new_topic)
-        parent.update_sub_node_count()
         return new_topic
 
     # ── LLM helpers ───────────────────────────────────────────────────────────
@@ -727,38 +717,6 @@ class CTree:
 
     # ── Node expansion / splitting ────────────────────────────────────────────
 
-    def _expand_node(self, node):
-        msg_nodes = [c for c in node.children if isinstance(c, MessageNode)]
-        if not msg_nodes:
-            return
-        messages  = []
-        for mn in msg_nodes:
-            messages.append(mn.user_message)
-            messages.append(mn.assistant_message)
-        subtopics = self._llm_split_subtopics(messages, node)
-        node.children.clear()
-        last_subtopic_node = None
-        for subtopic in subtopics:
-            s_off = subtopic["start_offset"]
-            e_off = subtopic["end_offset"]
-            s_idx = s_off // 2
-            e_idx = (e_off + 1) // 2
-            sn    = TopicNode(
-                topic_name  = subtopic["topic_name"],
-                start_index = node.start_index + s_off,
-                end_index   = node.start_index + e_off,
-                parent      = node,
-            )
-            for i in range(s_idx, min(e_idx, len(msg_nodes))):
-                mn        = msg_nodes[i]
-                mn.parent = sn
-                sn.children.append(mn)
-            node.children.append(sn)
-            last_subtopic_node = sn
-        node.update_sub_node_count()
-        if self.current_node is node and last_subtopic_node:
-            self.current_node = last_subtopic_node
-
     def _split_node(self, node):
         if node is self.root:
             self._expand_root_into_subtopics(node)
@@ -786,9 +744,6 @@ class CTree:
             t.parent = second_node; second_node.children.append(t)
         parent.children.remove(node)
         parent.children.extend([first_node, second_node])
-        first_node.update_sub_node_count()
-        second_node.update_sub_node_count()
-        parent.update_sub_node_count()
         if self.current_node is node:
             self.current_node = second_node
 
@@ -816,10 +771,8 @@ class CTree:
             for t in group_topics:
                 t.parent = sn
                 sn.children.append(t)
-            sn.update_sub_node_count()
             root_node.children.append(sn)
             last_subtopic_node = sn
-        root_node.update_sub_node_count()
         if last_subtopic_node:
             def _in_subtree(n, target):
                 if n is target: return True
@@ -1040,10 +993,8 @@ class CTree:
             old_parent.children.remove(source)
         except ValueError:
             return
-        old_parent.update_sub_node_count()
         source.parent = target
         target.children.append(source)
-        target.update_sub_node_count()
         if self.vdb is not None:
             try:
                 self.vdb.delete_topic_summary(source.node_id)
@@ -1165,9 +1116,6 @@ class CTree:
                 if sim < similarity_threshold:
                     continue
                 older, newer = (na, nb) if na.created_at <= nb.created_at else (nb, na)
-                if older.created_at > newer.created_at:
-                    skipped += 1
-                    continue
                 if self._is_ancestor_of(older, newer) or self._is_ancestor_of(newer, older):
                     skipped += 1
                     continue
