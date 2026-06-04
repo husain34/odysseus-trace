@@ -2,6 +2,7 @@ import sqlite3
 import struct
 import json
 import time
+import numpy as np
 
 
 
@@ -37,18 +38,13 @@ def unpack_float_vector(blob):
 def cosine_similarity(v1, v2):
     if not v1 or not v2 or len(v1) != len(v2):
         return 0.0
-    dot_product = 0.0
-    norm_v1_sq = 0.0
-    norm_v2_sq = 0.0
-    for i in range(len(v1)):
-        dot_product += v1[i] * v2[i]
-        norm_v1_sq += v1[i] * v1[i]
-        norm_v2_sq += v2[i] * v2[i]
-    norm_v1 = norm_v1_sq ** 0.5
-    norm_v2 = norm_v2_sq ** 0.5
+    vec1 = np.array(v1, dtype=np.float32)
+    vec2 = np.array(v2, dtype=np.float32)
+    norm_v1 = float(np.linalg.norm(vec1))
+    norm_v2 = float(np.linalg.norm(vec2))
     if norm_v1 == 0.0 or norm_v2 == 0.0:
         return 0.0
-    return dot_product / (norm_v1 * norm_v2)
+    return float(np.dot(vec1, vec2) / (norm_v1 * norm_v2))
 
 class VectorDatabase:
 
