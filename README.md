@@ -22,12 +22,16 @@
 
 ## ⚡ The TRACE Memory Engine
 
-This optimized fork integrates **TRACE**, a custom 2,000-line memory architecture engineered for high-performance, long-running agentic tasks. TRACE replaces the standard flat sliding-window memory model with a hierarchical, searchable **B+Tree architecture** backed by an async SQLite thread-pool. It surgically retrieves only the exact context the agent needs.
+**TRACE** (Temporal Retrieval And Context Engine) is a custom ~2,000-line agent memory architecture that replaces the standard flat sliding-window context model with a **hierarchical topic tree** (`CTree`) backed by a **SQLite vector store** (`VectorDatabase`). It is scoped exclusively to Agent mode — chat, documents, and all other features use Odysseus's original memory pipeline unchanged.
+
+### How It Works
+
+Each agent session maintains a `CTree`: a dynamic tree of `TopicNode` branches and `MessageNode` leaves. As the agent works, every exchange is LLM-classified in real time and routed to the correct branch — or a new one is created. Inactive branches are lazily summarised and embedded into SQLite. At each turn, `PromptSynthesizer` runs a dual-path retrieval — walking the active ancestor chain for structural context and cosine-searching the vector store for semantically relevant history — then assembles a compact, targeted context block. All blocking I/O (tree writes, vector search, LLM summarisation) is offloaded via `asyncio.run_in_executor` to avoid stalling the event loop.
 
 ### Performance
-- **~31% reduction** in token consumption.
-- **Perfect fact recall** across massive context windows.
-- **Zero latency degradation** during retrieval operations.
+- **~31% reduction** in token consumption vs. flat sliding-window context.
+- **Accurate long-range fact recall** via semantic vector retrieval across all prior branches.
+- **Zero latency degradation** — all heavy operations run off the async event loop via thread-pool offload.
 
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI · GitHub Copilot</sub>
