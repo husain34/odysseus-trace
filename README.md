@@ -1,4 +1,4 @@
-# Odysseus + TRACE Engine
+# Odysseus: TRACE Edition
 <p align="center">
   <img src="docs/odysseus-wordmark.png" alt="Odysseus" width="238">
 </p>
