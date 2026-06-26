@@ -643,6 +643,7 @@ _API_HOSTS = frozenset([
     "api.together.xyz", "api.fireworks.ai",
     "api.perplexity.ai", "api.x.ai",
     "ollama.com", "api.venice.ai", "api.kimi.com",
+    "api.nvidia.com",
     "api.githubcopilot.com",
 ])
 _MCP_KEYWORDS = frozenset(["mcp", "browse", "browser", "website", "calendar", "event", "email",
@@ -2287,7 +2288,7 @@ async def stream_agent_loop(
     except Exception as _e:
         logger.debug(f"endpoint supports_tools lookup failed: {_e}")
     _model_supports_tools = any(kw in _model_lc for kw in (
-        "gpt-4", "gpt-5", "gpt-o", "claude", "gemini", "gemma",
+        "gpt-4", "gpt-5", "gpt-4o", "claude", "gemini", "gemma",
         "qwen3", "qwen2.5", "mixtral", "mistral", "llama-3.1", "llama-3.2",
         "llama-3.3", "llama-4", "llama3.1", "llama3.2", "llama3.3", "llama4",
         # Local-served models that follow OpenAI-style function calling
@@ -2305,10 +2306,6 @@ async def stream_agent_loop(
     # and can override this list for users who know their setup.
     _model_no_tools = any(kw in _model_lc for kw in (
         "deepseek-r1",
-        # Open-weight GPT-OSS models are commonly served through llama.cpp /
-        # llama-cpp-python. Their names contain "gpt-o", but they do not use
-        # OpenAI's native tool-call channel unless the endpoint opts in.
-        "gpt-oss",
     ))
     # Native Ollama endpoints (/api/chat) handle tool schemas differently from
     # the OpenAI-compat path. Models like gemma4, qwen3.5, ministral respond to
@@ -2424,8 +2421,8 @@ async def stream_agent_loop(
 
     if trace_session:
         _t_trace = time.time()
-        from src.model_context import estimate_tokens
         
+
         # Get the latest user query from messages
         last_user_msg = ""
         for m in reversed(messages):
