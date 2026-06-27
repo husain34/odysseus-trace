@@ -38,6 +38,12 @@ from src.agent_tools import (
 
 logger = logging.getLogger(__name__)
 
+# B.2 FIX: Module-level set that keeps references to in-flight TRACE background
+# tasks alive. Without this, create_task() tasks can be garbage-collected before
+# the LLM classify/summarize calls inside add_exchange() complete, causing silent
+# memory loss. Tasks remove themselves via add_done_callback when finished.
+_TRACE_BG_TASKS: set = set()
+
 
 def _load_mcp_disabled_map() -> Dict[str, set]:
     """Load per-server disabled tool sets from the database."""
@@ -2421,39 +2427,42 @@ async def stream_agent_loop(
 
     if trace_session:
         _t_trace = time.time()
-        
 
-        # Get the latest user query from messages
+        # F.1 FIX: Capture the live user query NOW — before TRACE injects anything
+        # into `messages`.  This variable is reused at the end of the turn for
+        # add_exchange so we never accidentally extract TRACE-injected content.
         last_user_msg = ""
         for m in reversed(messages):
             if m.get("role") == "user":
                 if isinstance(m["content"], str):
                     last_user_msg = m["content"]
                 elif isinstance(m["content"], list):
-                    last_user_msg = " ".join(b.get("text", "") for b in m["content"] if isinstance(b, dict))
+                    last_user_msg = " ".join(
+                        b.get("text", "") for b in m["content"] if isinstance(b, dict)
+                    )
                 break
-                
+
         # Generate the multi-path B+Tree prompt block
         trace_context = await trace_session.get_system_prompt(last_user_msg)
-        
-        # --- TOKEN LIMIT ENFORCEMENT ---
-        # Odysseus default soft budget is usually 6000. Capping TRACE context to 2500 tokens.
-        trace_token_cap = 2500
-        current_trace_tokens = estimate_tokens([{"role": "system", "content": trace_context}])
-        
-        if current_trace_tokens > trace_token_cap:
-            logger.warning(f"TRACE context exceeded {trace_token_cap} tokens. Truncating.")
-            # Rough ratio: 1 token ~= 4 chars. Crop the text down to fit the budget.
-            char_limit = trace_token_cap * 4
-            trace_context = trace_context[:char_limit] + "\n...[TRACE Context Truncated due to size]..."
-        # -------------------------------
-        
-        # Inject it into the system prompt safely
+
+        # B.6 NOTE: No token truncation applied here. TRACE is already highly
+        # token-efficient (hierarchical summaries + surgical retrieval). Blindly
+        # character-slicing the context destroys its internal structure and cuts
+        # the most important section (Recent Logs) first. Log a warning only.
+        _trace_tokens = estimate_tokens([{"role": "system", "content": trace_context}])
+        if _trace_tokens > 3000:
+            logger.warning(
+                "[TRACE] Context is %d tokens — unusually large. "
+                "Consider running tree.reorganize() more frequently.",
+                _trace_tokens,
+            )
+
+        # Inject TRACE context into the system prompt safely
         if messages and messages[0]["role"] == "system":
             messages[0]["content"] = messages[0]["content"] + "\n\n" + trace_context
         else:
             messages.insert(0, {"role": "system", "content": trace_context})
-            
+
         prep_timings["trace_injection"] = time.time() - _t_trace
 
     # Strip internal metadata keys before sending to the LLM API
@@ -2474,6 +2483,9 @@ async def stream_agent_loop(
     time_to_first_token = None
     first_token_received = False
     tool_events = []   # Persist tool executions for history reload
+    # TRACE: pre-initialize so the variable always exists in scope regardless of
+    # whether the trace_session block below executes (Issue #3 guard).
+    last_user_msg = ""
     round_texts = []   # Cleaned text per round for history reload
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
@@ -3506,12 +3518,40 @@ async def stream_agent_loop(
             logger.warning(f"teacher escalation hook failed: {_esc_err}", exc_info=True)
 
     if trace_session and full_response:
-        initial_user_msg = _extract_last_user_message(messages)
-        asyncio.create_task(
+        # F.1 FIX: Use last_user_msg captured BEFORE TRACE injection (set above),
+        # not a re-extraction from the already-mutated messages list.
+        _trace_user_msg = last_user_msg if last_user_msg else ""
+
+        # F.3 FIX: Build a compact tool-usage log for this turn and store it
+        # as a system message in the TRACE tree so future retrieval can surface
+        # what tools were used and why — without bloating the live context.
+        _tool_summary = None
+        if tool_events:
+            _tool_lines = []
+            for _te in tool_events:
+                _tool_name = _te.get("tool", "unknown")
+                _cmd       = (_te.get("command") or "").strip()
+                _rc        = _te.get("exit_code")
+                _rc_str    = f" (exit {_rc})" if _rc not in (None, 0) else ""
+                _tool_lines.append(
+                    f"  - {_tool_name}{_rc_str}: {_cmd[:120]}" if _cmd
+                    else f"  - {_tool_name}{_rc_str}"
+                )
+            _tool_summary = "[Tool calls this turn]:\n" + "\n".join(_tool_lines)
+
+        # B.2 FIX: Use an anchored create_task instead of either:
+        #   - bare create_task (dropped by GC after stream closes), or
+        #   - await (blocks the stream until all LLM classify calls finish).
+        # Anchoring in _TRACE_BG_TASKS prevents GC collection while still
+        # letting [DONE] stream immediately to the client.
+        _trace_task = asyncio.create_task(
             trace_session.add_exchange(
-                user_msg=initial_user_msg, 
-                assistant_msg=full_response
+                user_msg=_trace_user_msg,
+                assistant_msg=full_response,
+                tool_summary=_tool_summary,
             )
         )
+        _TRACE_BG_TASKS.add(_trace_task)
+        _trace_task.add_done_callback(_TRACE_BG_TASKS.discard)
 
     yield "data: [DONE]\n\n"
