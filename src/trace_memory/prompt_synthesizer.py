@@ -223,13 +223,16 @@ class PromptSynthesizer:
             for msg in recent_messages:
                 role    = msg.get("role", "unknown").upper()
                 content = msg.get("content", "")
-                if isinstance(content, str) and len(content) > 600:
-                    content = content[:600] + "… [truncated]"
-                elif isinstance(content, list):
+                if isinstance(content, list):
                     content = "[multimodal message]"
                 recent_block += f"[{role}]: {content}\n"
         else:
             recent_block += "  (No messages yet)\n"
+        # F.2 FIX: get_system_prompt is called BEFORE add_exchange, so the live
+        # user query is not yet in tree.conversation. Inject it explicitly so
+        # the LLM always sees the current turn, not just turns 0..N-1.
+        if user_query and user_query.strip():
+            recent_block += f"[USER - CURRENT QUERY]: {user_query.strip()}\n"
 
         # Assemble final prompt
         now_str = datetime.now().strftime("%A, %d %B %Y, %I:%M %p")

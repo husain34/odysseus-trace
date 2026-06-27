@@ -1,9 +1,7 @@
 import sqlite3
 import struct
-import json
-import time
+import threading
 import numpy as np
-
 
 
 class ConversationVector:
@@ -47,109 +45,112 @@ def cosine_similarity(v1, v2):
     return float(np.dot(vec1, vec2) / (norm_v1 * norm_v2))
 
 class VectorDatabase:
+    """
+    B.4 FIX: Replaced the open-a-new-connection-per-call pattern with a single
+    persistent SQLite connection shared across all methods.
+
+    SQLite allows multi-threaded access with check_same_thread=False.  A
+    threading.Lock() serialises writes so concurrent calls from the asyncio
+    thread-pool executor never produce 'database is locked' errors.
+
+    WAL (Write-Ahead Logging) mode is enabled so readers never block writers.
+    """
 
     def __init__(self, db_path):
         self.db_path = db_path
+        # B.4 FIX: One persistent connection for the lifetime of this VectorDatabase.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        # WAL mode: readers and the single writer don't block each other.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Serialise writes from multiple threads (run_in_executor calls).
+        self._write_lock = threading.Lock()
         self._initialize_database()
 
     def _initialize_database(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self._write_lock:
+            cursor = self._conn.cursor()
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversation_vectors (
-                message_id TEXT PRIMARY KEY,
-                message_index INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                timestamp REAL NOT NULL,
-                thread_path TEXT NOT NULL
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS topic_summaries (
-                node_id     TEXT PRIMARY KEY,
-                topic_name  TEXT NOT NULL,
-                summary     TEXT NOT NULL,
-                embedding   BLOB NOT NULL,
-                start_index INTEGER,
-                end_index   INTEGER,
-                depth       INTEGER
-            )
-        """)
-        conn.commit()
-        conn.close()
-
-
-
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_vectors (
+                    message_id TEXT PRIMARY KEY,
+                    message_index INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    embedding BLOB NOT NULL,
+                    timestamp REAL NOT NULL,
+                    thread_path TEXT NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS topic_summaries (
+                    node_id     TEXT PRIMARY KEY,
+                    topic_name  TEXT NOT NULL,
+                    summary     TEXT NOT NULL,
+                    embedding   BLOB NOT NULL,
+                    start_index INTEGER,
+                    end_index   INTEGER,
+                    depth       INTEGER
+                )
+            """)
+            self._conn.commit()
 
     def add_conversation_message(self, msg):
         packed_vector = pack_float_vector(msg.embedding)
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('\n            INSERT OR REPLACE INTO conversation_vectors (\n                message_id, message_index, role, content, embedding, timestamp, thread_path\n            ) VALUES (?, ?, ?, ?, ?, ?, ?)\n        ', (msg.message_id, msg.message_index, msg.role, msg.text, packed_vector, msg.timestamp, msg.thread_path))
-        conn.commit()
-        conn.close()
-
-
+        with self._write_lock:
+            cursor = self._conn.cursor()
+            cursor.execute(
+                'INSERT OR REPLACE INTO conversation_vectors ('
+                '    message_id, message_index, role, content, embedding, timestamp, thread_path'
+                ') VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (msg.message_id, msg.message_index, msg.role, msg.text,
+                 packed_vector, msg.timestamp, msg.thread_path)
+            )
+            self._conn.commit()
 
     def search_conversation(self, query_vector, top_k=2, min_similarity=0.5):
         if not query_vector:
             return []
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('\n            SELECT message_id, message_index, role, content, embedding, timestamp, thread_path \n            FROM conversation_vectors\n        ')
+        cursor = self._conn.cursor()
+        cursor.execute(
+            'SELECT message_id, message_index, role, content, embedding, timestamp, thread_path '
+            'FROM conversation_vectors'
+        )
         rows = cursor.fetchall()
-        conn.close()
         scored_msgs = []
         for row in rows:
-            msg_id = row[0]
-            msg_idx = row[1]
-            role = row[2]
-            content = row[3]
-            raw_embed = row[4]
-            timestamp = row[5]
-            thread_path = row[6]
+            msg_id, msg_idx, role, content, raw_embed, timestamp, thread_path = row
             stored_vector = unpack_float_vector(raw_embed)
             sim = cosine_similarity(query_vector, stored_vector)
             if sim >= min_similarity:
-                data_tuple = (msg_id, msg_idx, role, content, timestamp, thread_path)
-                scored_msgs.append((sim, data_tuple))
+                scored_msgs.append((sim, (msg_id, msg_idx, role, content, timestamp, thread_path)))
         scored_msgs.sort(key=lambda x: x[0], reverse=True)
-        top_matches = []
-        for i in range(min(top_k, len(scored_msgs))):
-            top_matches.append(scored_msgs[i])
         results = []
-        for match in top_matches:
-            sim = match[0]
-            data = match[1]
-            msg_id = data[0]
-            msg_idx = data[1]
-            role = data[2]
-            content = data[3]
-            timestamp = data[4]
-            thread_path = data[5]
-            msg = ConversationVector(message_id=msg_id, message_index=msg_idx, role=role, text=content, embedding=[], timestamp=timestamp, thread_path=thread_path, similarity=sim)
+        for sim, data in scored_msgs[:top_k]:
+            msg_id, msg_idx, role, content, timestamp, thread_path = data
+            msg = ConversationVector(
+                message_id=msg_id, message_index=msg_idx, role=role,
+                text=content, embedding=[], timestamp=timestamp,
+                thread_path=thread_path, similarity=sim,
+            )
             results.append(msg)
         return results
 
-    # ── Topic Summary Methods (Change 1: Surgical Retrieval) ─────────────────
+    # ── Topic Summary Methods (Surgical Retrieval) ────────────────────────────
 
     def upsert_topic_summary(self, node_id, topic_name, summary, embedding,
                              start_index=None, end_index=None, depth=None):
         """Insert or replace a topic embedding row. Called when a node is frozen & summarised."""
         packed = pack_float_vector(embedding)
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            'INSERT OR REPLACE INTO topic_summaries '
-            '(node_id, topic_name, summary, embedding, start_index, end_index, depth) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (node_id, topic_name, summary, packed, start_index, end_index, depth)
-        )
-        conn.commit()
-        conn.close()
+        with self._write_lock:
+            cursor = self._conn.cursor()
+            cursor.execute(
+                'INSERT OR REPLACE INTO topic_summaries '
+                '(node_id, topic_name, summary, embedding, start_index, end_index, depth) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (node_id, topic_name, summary, packed, start_index, end_index, depth)
+            )
+            self._conn.commit()
 
     def search_topic_summaries(self, query_vector, top_k=3, min_similarity=0.40):
         """Cosine-search the topic_summaries table.
@@ -157,13 +158,11 @@ class VectorDatabase:
         """
         if not query_vector:
             return []
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self._conn.cursor()
         cursor.execute(
             'SELECT node_id, topic_name, summary, embedding FROM topic_summaries'
         )
         rows = cursor.fetchall()
-        conn.close()
         scored = []
         for row in rows:
             node_id, topic_name, summary, raw_embed = row
@@ -184,8 +183,7 @@ class VectorDatabase:
 
     def delete_topic_summary(self, node_id):
         """Remove a topic summary row by node_id (used by reorganizer on merge)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM topic_summaries WHERE node_id = ?', (node_id,))
-        conn.commit()
-        conn.close()
+        with self._write_lock:
+            cursor = self._conn.cursor()
+            cursor.execute('DELETE FROM topic_summaries WHERE node_id = ?', (node_id,))
+            self._conn.commit()

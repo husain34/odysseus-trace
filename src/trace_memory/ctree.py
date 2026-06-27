@@ -128,12 +128,12 @@ class MessageNode(Node):
         result = {
             "type":          "message",
             "message_index": self.message_index,
-            "user":          self.user_message.get("content", "")[:200],
-            "assistant":     self.assistant_message.get("content", "")[:200],
+            "user":          self.user_message.get("content", ""),
+            "assistant":     self.assistant_message.get("content", ""),
             "sub_node_count": self.sub_node_count,
         }
         if self.system_message is not None:
-            result["system"] = self.system_message.get("content", "")[:200]
+            result["system"] = self.system_message.get("content", "")
         return result
 
     def __repr__(self):
