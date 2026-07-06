@@ -683,7 +683,12 @@ async def build_chat_context(
     casual_low_signal = _is_casual_low_signal(message)
 
     # Memory enabled?
-    mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
+    import os
+    trace_active = os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true"
+    if trace_active:
+        mem_enabled = False
+    else:
+        mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
     # Skills injection respects its own enable toggle (mirrors memory_enabled).
     # When off, the "Available skills" index is not added to the prompt.
     skills_enabled = not incognito and uprefs.get("skills_enabled", True)
@@ -757,7 +762,12 @@ async def build_chat_context(
         sess.model = norm
 
     # Build messages
-    messages = preface + sess.get_context_messages()
+    chat_msgs = sess.get_context_messages()
+    import os
+    if os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true":
+        if len(chat_msgs) > 6:
+            chat_msgs = chat_msgs[-6:]
+    messages = preface + chat_msgs
 
     # Current date/time — injected as a standalone *user*-role context message
     # placed immediately before the latest user turn, NOT folded into the

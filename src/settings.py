@@ -154,6 +154,9 @@ DEFAULT_SETTINGS = {
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
+    "trace_endpoint_id": "",
+    "trace_model": "",
+    "trace_model_fallbacks": [],
     "teacher_model": "",
     "teacher_enabled": False,
     "teacher_tier2_enabled": False,
@@ -274,6 +277,7 @@ _PER_USER_KEYS = {
     # got injected into the chat composer on first open.
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
+    "trace_endpoint_id", "trace_model", "trace_model_fallbacks",
     "research_endpoint_id", "research_model",
 }
 

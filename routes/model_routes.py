@@ -41,6 +41,7 @@ _SPEECH_ENDPOINT_SETTINGS = (
 _ENDPOINT_SETTING_FIELDS = {
     "default_endpoint_id":  ("default_model",  "Default Model"),
     "utility_endpoint_id":  ("utility_model",   "Utility Model"),
+    "trace_endpoint_id":    ("trace_model",     "Trace Engine"),
     "research_endpoint_id": ("research_model",  "Deep Research"),
     "task_endpoint_id":     ("task_model",       "Background Tasks"),
 }
@@ -48,6 +49,7 @@ _ENDPOINT_SETTING_FIELDS = {
 _ENDPOINT_FALLBACK_FIELDS = {
     "default_model_fallbacks": "Default Model Fallbacks",
     "utility_model_fallbacks": "Utility Model Fallbacks",
+    "trace_model_fallbacks":   "Trace Engine Fallbacks",
     "vision_model_fallbacks":  "Vision Model Fallbacks",
 }
 

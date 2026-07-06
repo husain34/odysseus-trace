@@ -2588,12 +2588,25 @@ async def stream_agent_loop(
 
     import os
     from src.trace_manager import TRACEManager
+    from src.endpoint_resolver import resolve_endpoint
     trace_active = os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true"
     trace_session = None
     if trace_active and owner and session_id:
-        trace_session = await TRACEManager.get_or_create(owner, session_id, model)
+        t_url, t_model, t_hdrs = resolve_endpoint(
+            "trace",
+            fallback_url=endpoint_url,
+            fallback_model=model,
+            fallback_headers=headers,
+            owner=owner
+        )
+        t_api_key = t_hdrs.get("Authorization", "").replace("Bearer ", "").strip() if t_hdrs else None
+        
+        trace_session = await TRACEManager.get_or_create(owner, session_id, t_model, t_url, t_api_key)
 
     disabled_tools = set(disabled_tools or [])
+    if trace_active:
+        disabled_tools.add("manage_memory")
+        
     if tool_policy:
         disabled_tools.update(tool_policy.all_disabled_names())
         if tool_policy.disable_mcp:
@@ -4069,13 +4082,21 @@ async def stream_agent_loop(
                 _tool_task = asyncio.create_task(_run_tool())
                 # Drain progress events as they arrive — block until the
                 # next event OR the tool finishes (sentinel = None).
+                _get_task = asyncio.create_task(_progress_q.get())
+                _heartbeat_counter = 0
                 while True:
-                    evt = await _progress_q.get()
-                    if evt is None:
-                        break
-                    yield (
-                        f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
-                    )
+                    done, pending = await asyncio.wait([_get_task], timeout=5.0)
+                    if done:
+                        evt = _get_task.result()
+                        if evt is None:
+                            break
+                        yield (
+                            f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
+                        )
+                        _get_task = asyncio.create_task(_progress_q.get())
+                    else:
+                        _heartbeat_counter += 1
+                        yield f": heartbeat {_heartbeat_counter}\n\n"
                 desc, result = await _tool_task
 
             # A skill the model just loaded can prescribe tools that weren't
@@ -4562,5 +4583,9 @@ async def stream_agent_loop(
         )
         _TRACE_BG_TASKS.add(_trace_task)
         _trace_task.add_done_callback(_TRACE_BG_TASKS.discard)
+        # Periodically reorganize the tree to consolidate frozen branches
+        _reorg_task = asyncio.create_task(trace_session.maybe_reorganize())
+        _TRACE_BG_TASKS.add(_reorg_task)
+        _reorg_task.add_done_callback(_TRACE_BG_TASKS.discard)
 
     yield "data: [DONE]\n\n"

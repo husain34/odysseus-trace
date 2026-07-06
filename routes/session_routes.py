@@ -624,6 +624,16 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             db.query(DbSession).delete()
             db.commit()
             session_manager.sessions.clear()
+            
+            # Wipe all TRACE memory data for all users
+            import shutil
+            import os
+            try:
+                if os.path.exists("data/trace"):
+                    shutil.rmtree("data/trace")
+            except Exception as e:
+                logger.warning(f"Failed to wipe trace directory: {e}")
+                
             logger.info(f"Admin deleted all {count} sessions")
             return {"status": "deleted", "count": count}
         except Exception as e:

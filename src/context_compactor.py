@@ -323,16 +323,6 @@ async def maybe_compact(
 
     Returns (messages, context_length, was_compacted).
     """
-    import os
-    trace_active = os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true"
-    
-    if trace_active and agent_mode:
-        # TRACE provides all historical context. 
-        # We only keep the system prompt(s) and the very last user message.
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        last_msg = [messages[-1]] if messages and messages[-1].get("role") != "system" else []
-        return system_msgs + last_msg, get_context_length(endpoint_url, model), True
-
     context_length = get_context_length(endpoint_url, model)
     used = estimate_tokens(messages)
     pct = (used / context_length) * 100 if context_length else 0

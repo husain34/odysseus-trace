@@ -431,7 +431,7 @@ body.bg-pattern-sparkles {
       overflow: hidden;
       min-height: 0;
       margin: 0;
-      padding: 0;
+      padding: max(0px, calc(env(safe-area-inset-top, 0px) - 8px)) 0 0 0;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       backdrop-filter: blur(10px);
       border: 1px solid color-mix(in srgb, var(--fg) 11%, transparent);
@@ -643,7 +643,7 @@ body.bg-pattern-sparkles {
     /* Fixed hamburger — always visible, toggles sidebar */
     .hamburger-btn {
       position: fixed;
-      top: 12px;
+      top: calc(12px + env(safe-area-inset-top, 0px));
       left: 9px;
       right: auto;
       z-index: 210;
@@ -1831,12 +1831,12 @@ body.bg-pattern-sparkles {
       flex:1;
       display:flex;
       flex-direction:column;
-      padding:0 16px;
+      padding:0 16px 24px 16px;
       overflow:hidden;
       position:relative;
       min-height:0;
       min-width:0;
-      margin-top:8px;
+      margin-top: calc(2px + env(safe-area-inset-top, 0px));
       margin-bottom: 0;
       transition: margin-left 160ms cubic-bezier(0.22, 0.61, 0.36, 1),
                   margin-right 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -4282,7 +4282,7 @@ body.bg-pattern-sparkles {
     }
     @media (max-width:768px){
       .box { max-height:none; }
-      .chat-container { padding:10px; flex:1; margin-top:0; padding-top:42px; min-height:0; }
+      .chat-container { padding:10px; flex:1; margin-top:0; padding-top:calc(32px + env(safe-area-inset-top, 0px)); min-height:0; }
       .scroll-nav-btn { width:44px; height:44px; font-size:14px; margin-bottom:0; }
       .send-btn { width:48px; height:48px !important; border-radius:12px; }
       .send-btn svg { width:22px; height:22px; }
@@ -4424,7 +4424,7 @@ body.bg-pattern-sparkles {
       /* Incognito indicator — right side next to hamburger on mobile */
       .incognito-indicator {
         position: fixed;
-        top: 12px;
+        top: calc(12px + env(safe-area-inset-top, 0px));
         left: auto !important;
         right: 48px !important;
         transform: none;
@@ -4486,7 +4486,7 @@ body.bg-pattern-sparkles {
       .hamburger-btn {
         width: 44px;
         height: 44px;
-        top: 6px;
+        top: env(safe-area-inset-top, 0px);
         left: auto !important;
         right: 4px !important;
         -webkit-tap-highlight-color: transparent;
@@ -4572,9 +4572,6 @@ body.bg-pattern-sparkles {
         border-radius: 12px !important;
       }
       /* Safe area padding for notched devices */
-      .chat-input-bar {
-        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-      }
       /* Mode toggle — larger touch targets */
       .mode-toggle {
         height: 34px;

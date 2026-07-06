@@ -529,6 +529,14 @@ class SessionManager:
             db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
             if db_session:
                 db.delete(db_session)
+                
+            # Cleanup TRACE memory files if they exist
+            import os, glob
+            for trace_file in glob.glob(f"data/trace/*/{session_id}.*"):
+                try:
+                    os.remove(trace_file)
+                except Exception as e:
+                    logger.warning(f"Failed to delete trace file {trace_file}: {e}")
 
             # Drop the in-memory copy even when there is no DB row. A "ghost"
             # session lives only here (never persisted, or its row was removed

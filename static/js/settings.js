@@ -639,6 +639,68 @@ async function initUtilityModel() {
   });
 }
 
+/* ── Trace Engine ── */
+async function initTraceModel() {
+  var epSel = el('set-traceEpSelect');
+  var modelSel = el('set-traceModelSelect');
+  var msg = el('set-traceChatMsg');
+  var _endpoints = [];
+  var fallbackWidget = null;
+  if (epSel && epSel.options[0]) epSel.options[0].textContent = 'Same as chat';
+  if (modelSel && modelSel.options[0]) modelSel.options[0].textContent = 'Same as chat';
+
+  try {
+    _endpoints = await _fetchModelEndpoints();
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+  } catch (e) { console.warn('Failed to load endpoints for trace model', e); }
+
+  function refreshModels(selectedModel) {
+    var epId = epSel.value;
+    var ep = _endpoints.find(function(e) { return e.id === epId; });
+    _fillModelSelect(modelSel, ep ? ep.models : [], selectedModel, true);
+  }
+
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    if (settings.trace_endpoint_id) epSel.value = settings.trace_endpoint_id;
+    refreshModels(settings.trace_model || '');
+    fallbackWidget = _bindFallbackWidget({
+      containerId: 'set-traceFallbacks',
+      addBtnId: 'set-traceAddFallback',
+      endpoints: function() { return _endpoints; },
+      settingKey: 'trace_model_fallbacks',
+      initial: Array.isArray(settings.trace_model_fallbacks)
+        ? settings.trace_model_fallbacks.map(function(f) { return { endpoint_id: (f && f.endpoint_id) || '', model: (f && f.model) || '' }; })
+        : [],
+    });
+  } catch (e) { console.warn('Failed to load trace model settings', e); }
+
+  async function saveTrace() {
+    try {
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trace_endpoint_id: epSel.value || '',
+          trace_model: modelSel.value || ''
+        })
+      });
+      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+      setTimeout(function() { msg.textContent = ''; }, 1500);
+    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
+  }
+
+  epSel.addEventListener('change', function() { refreshModels(''); saveTrace(); });
+  modelSel.addEventListener('change', saveTrace);
+
+  _registerAiEndpointRefresh(function(endpoints) {
+    _endpoints = endpoints;
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+    refreshModels(modelSel.value);
+    if (fallbackWidget && fallbackWidget.refresh) fallbackWidget.refresh();
+  });
+}
+
 /* ── Teacher Model ── */
 // SOTA model called automatically when a self-hosted student model
 // fails an agent-mode task. Stored as a single `teacher_model` string
@@ -2326,6 +2388,7 @@ function initAll() {
   initDefaultChat();
   initTeacherModel();
   initUtilityModel();
+  initTraceModel();
   initImageSettings();
   initVisionSettings();
   initTtsSettings();

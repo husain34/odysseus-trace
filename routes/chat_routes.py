@@ -1211,8 +1211,15 @@ def setup_chat_routes(
                 from src.ai_interaction import do_generate_image
                 _user_msg = message or ""
                 yield f'data: {json.dumps({"type": "tool_start", "tool": "generate_image", "command": _user_msg[:100]})}\n\n'
-                yield ": heartbeat\n\n"
-                _img_result = await do_generate_image(f"{_user_msg}\n{sess.model}", session, owner=_user)
+                _heartbeat_counter = 0
+                _img_task = asyncio.create_task(do_generate_image(f"{_user_msg}\n{sess.model}", session, owner=_user))
+                while not _img_task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_img_task), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        _heartbeat_counter += 1
+                        yield f": heartbeat {_heartbeat_counter}\n\n"
+                _img_result = _img_task.result()
                 _img_output = _img_result.get("results", _img_result.get("error", ""))
                 _img_tool_data = {"type": "tool_output", "tool": "generate_image", "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
                 for _k in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
@@ -1239,6 +1246,43 @@ def setup_chat_routes(
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
+
+                # TRACE Injection for Chat Mode
+                from src.trace_manager import TRACEManager
+                from src.endpoint_resolver import resolve_endpoint
+                import os
+                trace_active = os.getenv("TRACE_AGENT_MEMORY", "true").lower() == "true"
+                trace_session = None
+                if trace_active and _user and session:
+                    _api_key = sess.headers.get("Authorization", "").replace("Bearer ", "").strip() if sess.headers else None
+                    
+                    t_url, t_model, t_hdrs = resolve_endpoint(
+                        "trace",
+                        fallback_url=sess.endpoint_url,
+                        fallback_model=sess.model,
+                        fallback_headers=sess.headers,
+                        owner=_user
+                    )
+                    t_api_key = t_hdrs.get("Authorization", "").replace("Bearer ", "").strip() if t_hdrs else None
+                    
+                    trace_session = await TRACEManager.get_or_create(_user, session, t_model, t_url, t_api_key)
+                # F.1: Capture the live user query NOW — before TRACE injects into messages.
+                # This is reused by add_exchange so we never accidentally store TRACE-injected text.
+                _trace_last_user_msg = ""
+                if trace_session:
+                    for m in reversed(messages):
+                        if m["role"] == "user":
+                            _trace_last_user_msg = m.get("content", "")
+                            if isinstance(_trace_last_user_msg, list):
+                                _trace_last_user_msg = next((c.get("text", "") for c in _trace_last_user_msg if c.get("type") == "text"), "")
+                            break
+                    trace_context = await trace_session.get_system_prompt(_trace_last_user_msg)
+                    if trace_context:
+                        if messages and messages[0]["role"] == "system":
+                            messages[0]["content"] = messages[0]["content"] + "\n\n" + trace_context
+                        else:
+                            messages.insert(0, {"role": "system", "content": trace_context})
+
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
                     _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
@@ -1357,6 +1401,21 @@ def setup_chat_routes(
                                     owner=_user,
                                     allow_background_extraction=not tool_policy.block_all_tool_calls,
                                 )
+
+                                if trace_session:
+                                    _trace_task = asyncio.create_task(
+                                        trace_session.add_exchange(
+                                            user_msg=_trace_last_user_msg,
+                                            assistant_msg=full_response
+                                        )
+                                    )
+                                    from src.agent_loop import _TRACE_BG_TASKS
+                                    _TRACE_BG_TASKS.add(_trace_task)
+                                    _trace_task.add_done_callback(_TRACE_BG_TASKS.discard)
+                                    # Periodically reorganize the tree to consolidate frozen branches
+                                    _reorg_task = asyncio.create_task(trace_session.maybe_reorganize())
+                                    _TRACE_BG_TASKS.add(_reorg_task)
+                                    _reorg_task.add_done_callback(_TRACE_BG_TASKS.discard)
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):
@@ -1575,11 +1634,12 @@ def setup_chat_routes(
         # buffered output + live); dropping the SSE only removes a subscriber —
         # the run keeps going and saves the assistant message on completion
         # regardless. Reconnect via /api/chat/resume.
+        sse_headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
         if compare_mode:
-            return StreamingResponse(_safe_stream(), media_type="text/event-stream")
+            return StreamingResponse(_safe_stream(), media_type="text/event-stream", headers=sse_headers)
 
         agent_runs.start(session, _safe_stream())
-        return StreamingResponse(agent_runs.subscribe(session), media_type="text/event-stream")
+        return StreamingResponse(agent_runs.subscribe(session), media_type="text/event-stream", headers=sse_headers)
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/resume — reconnect to a detached run that's still going
@@ -1590,7 +1650,8 @@ def setup_chat_routes(
         _verify_session_owner(request, session_id)
         if not agent_runs.is_active(session_id):
             raise HTTPException(404, "No active run for this session")
-        return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
+        sse_headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+        return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream", headers=sse_headers)
 
     # ------------------------------------------------------------------ #
     # POST /api/chat/stop — cancel a detached run (Stop button). Closing the SSE
@@ -1770,6 +1831,7 @@ def setup_chat_routes(
                 logger.error("Rewrite stream error: %s", e)
                 yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 500})}\n\n'
 
-        return StreamingResponse(stream_rewrite(), media_type="text/event-stream")
+        sse_headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+        return StreamingResponse(stream_rewrite(), media_type="text/event-stream", headers=sse_headers)
 
     return router
