@@ -4082,21 +4082,13 @@ async def stream_agent_loop(
                 _tool_task = asyncio.create_task(_run_tool())
                 # Drain progress events as they arrive — block until the
                 # next event OR the tool finishes (sentinel = None).
-                _get_task = asyncio.create_task(_progress_q.get())
-                _heartbeat_counter = 0
                 while True:
-                    done, pending = await asyncio.wait([_get_task], timeout=5.0)
-                    if done:
-                        evt = _get_task.result()
-                        if evt is None:
-                            break
-                        yield (
-                            f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
-                        )
-                        _get_task = asyncio.create_task(_progress_q.get())
-                    else:
-                        _heartbeat_counter += 1
-                        yield f": heartbeat {_heartbeat_counter}\n\n"
+                    evt = await _progress_q.get()
+                    if evt is None:
+                        break
+                    yield (
+                        f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
+                    )
                 desc, result = await _tool_task
 
             # A skill the model just loaded can prescribe tools that weren't
