@@ -2054,26 +2054,30 @@ def _build_system_prompt(
         if merged[i].get("role") == "user":
             last_user_idx = i
             break
+    
+    _blocks = []
     if _doc_message:
-        merged.insert(last_user_idx, _doc_message)
-        last_user_idx += 1  # the document message is now at last_user_idx
+        _blocks.append(_doc_message["content"])
     if _email_message:
-        merged.insert(last_user_idx, _email_message)
-        last_user_idx += 1
+        _blocks.append(_email_message["content"])
     if _email_style_message:
-        merged.insert(last_user_idx, _email_style_message)
-        last_user_idx += 1
+        _blocks.append(_email_style_message["content"])
     if _integ_message:
-        merged.insert(last_user_idx, _integ_message)
-        last_user_idx += 1
+        _blocks.append(_integ_message["content"])
     if _mcp_desc_message:
-        merged.insert(last_user_idx, _mcp_desc_message)
-        last_user_idx += 1
+        _blocks.append(_mcp_desc_message["content"])
     if _skills_message:
-        merged.insert(last_user_idx, _skills_message)
-        last_user_idx += 1
+        _blocks.append(_skills_message["content"])
     if _datetime_message:
-        merged.insert(last_user_idx, _datetime_message)
+        _blocks.append(_datetime_message["content"])
+
+    if _blocks:
+        _combined_text = "\n\n".join(_blocks) + "\n\n"
+        _last_content = merged[last_user_idx].get("content", "")
+        if isinstance(_last_content, list):
+            merged[last_user_idx]["content"] = [{"type": "text", "text": _combined_text}] + _last_content
+        else:
+            merged[last_user_idx]["content"] = _combined_text + str(_last_content)
 
     return merged, mcp_schemas
 

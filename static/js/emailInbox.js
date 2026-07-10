@@ -1143,8 +1143,7 @@ function _showRemindSubmenu(em, parentDropdown) {
 }
 
 async function _createReplyReminder(em, dueDate) {
-  const pad = n => String(n).padStart(2, '0');
-  const iso = `${dueDate.getFullYear()}-${pad(dueDate.getMonth()+1)}-${pad(dueDate.getDate())}T${pad(dueDate.getHours())}:${pad(dueDate.getMinutes())}`;
+  const iso = dueDate.toISOString();
   const from = em.from || em.sender || 'someone';
   const payload = {
     title: `Reply: ${em.subject || '(no subject)'}`,

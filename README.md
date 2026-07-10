@@ -33,6 +33,9 @@ Each agent session maintains a `CTree`: a dynamic tree of `TopicNode` branches a
 - **Accurate long-range fact recall** via semantic vector retrieval across all prior branches.
 - **Zero latency degradation** — all heavy operations run off the async event loop via thread-pool offload.
 
+### Known Limitations
+- **Message Editing/Deletion**: TRACE builds a progressive semantic structure as the conversation evolves. Because of this, deleting or editing past messages in the chat UI will currently not retroactively remove or alter them from the agent's underlying TRACE memory tree.
+
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI · GitHub Copilot</sub>
   - **Agent** -- hand it tools and let it run the whole task itself.<br>　<sub>built on [opencode](https://github.com/anomalyco/opencode) · MCP · web · files · shell · skills · memory</sub>

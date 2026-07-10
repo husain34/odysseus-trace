@@ -783,7 +783,11 @@ async def build_chat_context(
             from src.user_time import current_datetime_context_message
             _dt_msg = current_datetime_context_message()
             if messages and messages[-1].get("role") == "user":
-                messages.insert(len(messages) - 1, _dt_msg)
+                _last_content = messages[-1].get("content", "")
+                if isinstance(_last_content, list):
+                    messages[-1]["content"] = [{"type": "text", "text": _dt_msg["content"] + "\n\n"}] + _last_content
+                else:
+                    messages[-1]["content"] = _dt_msg["content"] + "\n\n" + str(_last_content)
             else:
                 messages.append(_dt_msg)
         except Exception:
