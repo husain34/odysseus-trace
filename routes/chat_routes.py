@@ -1211,15 +1211,8 @@ def setup_chat_routes(
                 from src.ai_interaction import do_generate_image
                 _user_msg = message or ""
                 yield f'data: {json.dumps({"type": "tool_start", "tool": "generate_image", "command": _user_msg[:100]})}\n\n'
-                _heartbeat_counter = 0
-                _img_task = asyncio.create_task(do_generate_image(f"{_user_msg}\n{sess.model}", session, owner=_user))
-                while not _img_task.done():
-                    try:
-                        await asyncio.wait_for(asyncio.shield(_img_task), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        _heartbeat_counter += 1
-                        yield f": heartbeat {_heartbeat_counter}\n\n"
-                _img_result = _img_task.result()
+                yield ": heartbeat\n\n"
+                _img_result = await do_generate_image(f"{_user_msg}\n{sess.model}", session, owner=_user)
                 _img_output = _img_result.get("results", _img_result.get("error", ""))
                 _img_tool_data = {"type": "tool_output", "tool": "generate_image", "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
                 for _k in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
