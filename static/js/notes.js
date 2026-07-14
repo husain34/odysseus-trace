@@ -18,7 +18,6 @@ let _open = false;
 let _notes = [];
 let _editingId = null;
 let _selectedIds = new Set();
-const _utc = (v) => v && v.includes('T') && !v.endsWith('Z') ? new Date(v).toISOString() : (v || null);
 let _activeLabel = null;
 let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'
 // Cycle order for the Reminders chip: each click on it advances reminders →
@@ -2861,7 +2860,7 @@ function _collectFormDraft(form) {
     color: form.dataset.noteColor || '',
     title: form.querySelector('.note-form-title')?.value || '',
     label: form.querySelector('.note-form-label')?.value || '',
-    due_date: _utc(form.querySelector('.note-form-due')?.value),
+    due_date: form.querySelector('.note-form-due')?.value || null,
     repeat: form.querySelector('.note-form-repeat')?.value || 'none',
   };
   if (type === 'note') d.content = form.querySelector('.note-form-content')?.value || '';
@@ -3636,7 +3635,7 @@ function _buildForm(note = null) {
       note_type: currentType,
       color: currentColor,
       label: labelVal,
-      due_date: _utc(form.querySelector('.note-form-due')?.value),
+      due_date: form.querySelector('.note-form-due').value || null,
       repeat: form.querySelector('.note-form-repeat')?.value || 'none',
       image_url: currentImageUrl || null,
     };

@@ -7699,7 +7699,10 @@ function _promptEmailNote(em) {
 }
 
 async function _createEmailReplyReminder(em, dueDate, customText = '') {
-  const iso = dueDate ? dueDate.toISOString() : null;
+  const pad = n => String(n).padStart(2,'0');
+  const iso = dueDate
+    ? `${dueDate.getFullYear()}-${pad(dueDate.getMonth()+1)}-${pad(dueDate.getDate())}T${pad(dueDate.getHours())}:${pad(dueDate.getMinutes())}`
+    : null;
   const fullFrom = em.from || em.sender || '';
   // Extract just the first name from "First Last <email@x>" or fall back to email local part
   let from = 'someone';
