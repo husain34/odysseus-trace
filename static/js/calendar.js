@@ -582,7 +582,7 @@ async function _createEventReminder(ev, dueDate) {
     : new Date(ev.dtstart).toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
   const summary = ev.summary || '(no title)';
   const loc = ev.location ? ` @ ${ev.location}` : '';
-  const text = `${summary}${loc} — ${startFmt}`;
+  const text = `${summary}${loc} — ${startFmt}` + (ev.description ? `\n\n${ev.description.substring(0, 4000)}` : '');
   const payload = {
     title: `Reminder: ${summary}`,
     note_type: 'todo',
